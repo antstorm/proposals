@@ -59,7 +59,7 @@ Temporal.start_workflow(MyWorkflow)
 ```
 
 While probably a bit too simple for an average use-case, this is the first thing that most engineers
-will be looking at when considing using Temporal at their companies. Hence the simplicity and a
+will be looking at when considering using Temporal at their companies. Hence the simplicity and a
 cheeky attempt to make a good first impression.
 
 
@@ -73,8 +73,8 @@ Here's an example of a global application configuration:
 ```ruby
 Temporal.configure do |config|
   config.url = 'my-temporal-server.com:7233' # connection string
-  config.namespace = 'my-namespace' # default namespace unless explicitly overriden by the caller
-  config.task_queue = 'my-task-queue' # default task queue unless explicitly overriden by the caller
+  config.namespace = 'my-namespace' # default namespace unless explicitly overridden by the caller
+  config.task_queue = 'my-task-queue' # default task queue unless explicitly overridden by the caller
   config.logger = Logger.new(STDOUT, progname: 'temporal-ruby-sdk') # default Ruby logger
 end
 ```
@@ -82,7 +82,7 @@ end
 Notes:
 
 - This configuration will get picked by the singleton client
-- This configuration will be used by the worker (unless explicitly overriden)
+- This configuration will be used by the worker (unless explicitly overridden)
 - This is not the full list of available configuration options
 - All the configuration options come with sane defaults
 
@@ -167,7 +167,7 @@ worker.register_workflow(NewWorkflow) # assumes namespace: 'ns-1', task_queue: '
 worker.register_activity(NewActivity) # assumes namespace: 'ns-2', task_queue: 'tq-2'
 ```
 
-This of course can be fully or partially over-written by the caller, which has the full control over
+This of course can be fully or partially overwritten by the caller, which has the full control over
 the resulting attributes. For example:
 
 ```ruby
@@ -207,7 +207,7 @@ Notes:
 
 - This approach does not enforce class definitions for external workflows/activities (e.g.
   implemented using a different SDK)
-- Timeouts and retry policy are ommited from the caller examples, but work exactly the same
+- Timeouts and retry policy are omited from the caller examples, but work exactly the same
   way
 - When scheduling activities we'll use the same approach. More on this in the Phase 2, when
   we'll be discussing workflow and activity inner APIs
@@ -268,7 +268,7 @@ Temporal.start_workflow('MyWorkflow', options: { namespace: NAMESPACE, task_queu
 ```
 
 *NOTE: While this example shows the extreme end of explicitness, it is a spectrum and the SDK users
-can choose to gradualy start overriding the defaults until they achieve what feels comfortable.*
+can choose to gradually start overriding the defaults until they achieve what feels comfortable.*
 
 
 ## Client
@@ -387,7 +387,7 @@ a given size for executing tasks (one pool for activities and one for workflows)
 reserve a thread on a thread pool before polling to ensure there's capacity for processing a task.
 
 To support multiple processes we'll have a `Temporal::Crew` class that run a given worker
-across a defined number of forked processed. The parent process will then monitor child processes
+across a defined number of forked processes. The parent process will then monitor child processes
 restarting misbehaving and dead ones.
 
 ```ruby

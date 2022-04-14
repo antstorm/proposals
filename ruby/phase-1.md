@@ -1,6 +1,31 @@
-Timeline (heavily influenced by Python SDK proposal):
+# Ruby SDK - Phase 1
 
-- Phase 1 — overview, execution attributes, workflow/activity outer APIs, client and worker
+Ruby is a popular dynamic programming language that many companies are leaning on to beat their
+competitors to the market. With the focus on the speed of execution it is very common for these
+companies to rely on managed solutions. This presents an opportunity for Temporal to become Ruby's
+de facto standard for workflow orchestration.
+
+This proposal aims to adhere to the Ruby way of writing code favouring convention over
+configuration, readability, testability and developer's productivity. These are prioritised in order
+to avoid the destiny of the [AWS Flow Framework for Ruby](https://github.com/amazon-archives/aws-flow-ruby)
+that never appealed to the Ruby community.
+
+
+## Disclaimer
+
+This proposal draws substantial inspiration from the [Temporal Ruby SDK](https://github.com/coinbase/temporal-ruby)
+developed at Coinbase by the author of this proposal. This allows us to pick the best parts of the
+former SDK and improve on the parts that are not so good.
+
+The proposal itself follows the [Python SDK proposal](https://github.com/temporalio/proposals/blob/master/python/phase-1.md)
+for the same exact reason.
+
+
+## Timeline
+
+The Ruby SDK will be implemented in four loosely defined phases:
+
+- Phase 1 — initial setup, execution attributes, workflow/activity outer APIs, client and worker
 - Phase 2 — workflow and activity inner APIs, local activities, async activity completion, etc
 - Phase 3 — payload converters, error handling, middleware
 - Phase 4 — Sandbox, replayer, support for testing
@@ -8,16 +33,27 @@ Timeline (heavily influenced by Python SDK proposal):
 
 ## Overview
 
-Principles:
+The Ruby SDK will be implemented on top of the [SDK Core](https://github.com/temporalio/sdk-core).
+The exact bridging mechanism will decided later as there are different alternatives.
 
-* Quickest path to a working setup (without sacrificing configurability)
-* Convention over configuration
-* Minimise external dependencies (gems)
+### Goals
 
-Non-goals:
+- Quickest path to a working setup
+- Convention over configuration
+- Avoid sacrificing configurability of a complex setup
+- Minimise external dependencies (gems)
+- Local and end-to-end testability of workflows
 
-* Replicate the interface of other SDKs
-* Backwards compatibility with Coinbase's Ruby SDK
+### Non-goals
+
+- Replicate the interface of other SDKs
+- Backwards compatibility with Coinbase's Ruby SDK
+
+### Tech stack && approach
+
+- Ruby >= 2.7 (currently oldest fully supported version)
+- Packaged as a Ruby gem (and published to [https://rubygems.org])
+- FFI or Rutie bridge into SDK Core (to be decided)
 
 
 ## An end-to-end example

@@ -222,13 +222,15 @@ end
 
 config = Temporal::Configuration.new(
   url: 'localhost:7233'
-  namespace: 'my-namespace'
 )
 
 client = Temporal::Client.new(config)
-client.start_workflow(MyWorkflow, 'Alice', options: { task_queue: 'my-queue' })
+client.start_workflow(MyWorkflow, 'Alice', options: {
+  namespace: 'my-namespace',
+  task_queue: 'my-queue'
+})
 
-worker = Temporal::Worker.new(config, task_queue: 'my-queue')
+worker = Temporal::Worker.new(config, 'my-namespace', 'my-queue')
 worker.register_workflow(MyWorkflow)
 worker.register_activity(MyActivity)
 worker.run
@@ -242,13 +244,17 @@ managing namespaces. A client is created with a configuration object that specif
 between a worker and a client.
 
 ```ruby
-config = Temporal::Configuration.new(url: 'localhost:7233', namespace: 'my-namespace')
+config = Temporal::Configuration.new(url: 'localhost:7233')
 client = Temporal::Client.new(config)
-client.start_workflow(MyWorkflow, 'arg_1', kwarg_2: 'foo', options: { task_queue: 'my-queue' })
+client.start_workflow(MyWorkflow, 'arg_1', kwarg_2: 'foo', options: {
+  namespace: 'my-namespace',
+  task_queue: 'my-queue'
+})
 ```
 
 Notes:
 
+- Client is intended to be multi-tenant capable (no limit on a single namespace)
 - Configuration will provide defaults where possible (avoiding extensive upfront configuration)
 - Configuration will be used for other more advanced options such as logger, metrics, payload
   converters, middleware, etc
@@ -275,8 +281,8 @@ class Temporal::Client
     **kwargs # keyword arguments as inputs are also supported
   ) -> Any
 
-  # Generate a handle object from a workflow_id and a run_id
-  def workflow_handle(workflow_id, run_id = nil) -> Temporal::WorkflowHandle
+  # Generate a handle object from a namespace, workflow_id and a run_id
+  def workflow_handle(namespace, workflow_id, run_id = nil) -> Temporal::WorkflowHandle
 end
 ```
 
@@ -316,6 +322,13 @@ class Temporal::WorkflowHandle
 end
 ```
 
+### Alternatives considered
+
+We thought about configuring the `Temporal::Client` with a namespace, similar to the Python SDK.
+It does bring the benefit of avoiding namespace to subsequent calls to the client. However we feel
+like it is an unjustified and artificial limitation that will impact some multi-tenant applications.
+Besides this can always be brought in a shape of a `NamespacedClient` if there's a need for it.
+
 
 ## Worker
 
@@ -323,16 +336,16 @@ The worker interface allows SDK users to start processing registered workflow an
 will then be polled for on the specified namespaces & task queues and executed.
 
 ```ruby
-config = Temporal::Configuration.new(url: 'localhost:7233', namespace: 'my-namespace')
+config = Temporal::Configuration.new(url: 'localhost:7233')
 
-worker_1 = Temporal::Worker.new(config, task_queue: 'my-task-queue')
-worker_1.register_workflow(MyWorkflow)
-worker_1.register_activity(MyActivity)
+worker_1 = Temporal::Worker.new(config, 'my-namespace', 'my-task-queue')
+worker_1.register_workflow(MyWorkflow) # uses 'MyWorkflow' as a name
+worker_1.register_activity(MyActivity) # uses 'MyActivity' as a name
 worker_1.start
 
-worker_2 = Temporal::Worker.new(config, task_queue: 'another-task-queue')
-worker_2.register_workflow(MyWorkflow, name: 'my-workflow')
-worker_2.register_activity(MyActivity, name: 'my-activity')
+worker_2 = Temporal::Worker.new(config, 'my-namespace', 'another-task-queue')
+worker_2.register_workflow(MyWorkflow, name: 'my-workflow') # uses 'my-workflow' as a name
+worker_2.register_activity(MyActivity, name: 'my-activity') # uses 'my-activity' as a name
 worker_2.start
 
 # later
@@ -356,7 +369,7 @@ And here is the `Worker` interface:
 ```ruby
 class Worker
   # Create a new instance of a Worker
-  def self.new(config: Temporal::Configuration, **options) -> Worker
+  def self.new(config: Temporal::Configuration, namespace: String, task_queue: String, **options) -> Worker
 
   # Register a workflow with an optional :name
   def register_workflow(Class, name: nil) -> void
@@ -374,6 +387,43 @@ class Worker
   def stop() -> void
 end
 ```
+
+Internally each worker will create a thread for task polling as well as a thread pool of a given
+size (passed to the initializer as an optional `:threads` argument). Then each activity task will be
+dispatched to an available thread (via an in-memory queue). To make sure a polling worker always has
+processing capacity a polling request will only be dispatched if there is an available thread in the
+pool (in other words the pool will have no buffer).
+
+A very similar model will be used for workflow tasks, with an added complexity of wrapping each
+workflow in its own Fiber (inside a thread). This serves two purposes:
+
+1. A workflow code can be paused and resumed during the history replay
+2. Sticky workflows can be left paused while waiting for the next workflow task
+
+Given that Fibers are very lightweight this will allow us to keep many stick workflows efficiently
+in memory and manage accordingly to the worker configuration.
+
+Here's a diagram to demostrate the whole setup:
+
+<img src="./ruby_threads.png" width="400" align="center" alt="Temporal" />
+
+### Alternatives considered
+
+We've decided against using the `Client` to initialize the `Worker` (something that Go and Python
+SDKs are doing). It seemed like a wrong abstraction and would require making many attributes public
+on the client to make sure the worker can access them (expanding the public API of a client). Using
+a configuration object solves this and opens up further optimisation opportunities (that will be
+proposed in the 2nd phase).
+
+We can potentially use reactor pattern via Async gem. This has the benefit of giving extra
+performance, however it would drastically reduce the performance unless activities are written in a
+reactor-friendly way. This can be further added as an optional approach to apps already using Async,
+but doesn't feel like a great default option.
+
+Additionally the SDK users will want to leverage multiple CPU by spawning multiple worker processes.
+We have agreed that this part should be left out of the Ruby SDK and handled by developers
+themselves. Potentially this functionality can be added as a separate Ruby gem.
+
 
 ## Activities
 
@@ -397,11 +447,12 @@ class MyActivity < Temporal::Activity
   def execute(arg_1, arg_2: nil)
     loop do
       sleep 1
-      activity.logger.info('❤️beat')
+      activity.logger.info('❤️')
+      activity.logger.debug("Attempt #{activity.info.attempts}")
       activity.heartbeat('details')
     end
   rescue Temporal::ActivityCancelled
-    raise ManuallyCancelled, 'someone cancelled me'
+    raise ManuallyCancelled, 'activity got cancelled'
   end
 end
 ```
@@ -412,19 +463,22 @@ Notes:
 - `activity.logger` will use a logging adapter configure via `Temporal::Configuration` (more on
   this in the 2nd phase)
 - Common logging context can be configured by using middleware (more on this in the 2nd phase)
+- `activity.heartbeat` is a synchronous call
 - Errors defined within the activity class will be namespaces `MyActivity::ManuallyCancelled`,
   which is a very useful property
 
 ```ruby
 class Temporal::Activity::Context
+  # Access to a pre-configured logger
   def logger() -> Temporal::Logger
 
+  # Heartbeat will raise if a cancellation was requested
   def heartbeat(*details) -> void
 
+  # Provides access to extra details from PollActivityTaskQueueResponse
   def info() -> Temporal::Info::Activity
 end
 ```
-
 
 ## Payload converters
 

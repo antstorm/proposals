@@ -323,7 +323,7 @@ The worker interface allows SDK users to start processing registered workflow an
 will then be polled for on the specified namespaces & task queues and executed.
 
 ```ruby
-config Temporal::Configuration.new(url: 'localhost:7233', namespace: 'my-namespace')
+config = Temporal::Configuration.new(url: 'localhost:7233', namespace: 'my-namespace')
 
 worker_1 = Temporal::Worker.new(config, task_queue: 'my-task-queue')
 worker_1.register_workflow(MyWorkflow)
@@ -348,6 +348,8 @@ Notes:
 - Each worker will run in its own thread
 - A blocking `Worker#run` method will be available for convenience of running a single worker in
   a process until SIGTERM or SIGINT is received
+- In case connection sharing is a concern we can create and memoize a connection on the instance of
+  Temporal::Configuration
 
 And here is the `Worker` interface:
 
@@ -375,7 +377,54 @@ end
 
 ## Activities
 
-TODO
+Each activity is going to be represented by its own class. This decision comes with a few benefits:
+
+- There's no need to pollute global scope with activity methods (see "Global Scope" section)
+- There's no need to inject global context for communicating with Temporal. It will be available
+  through a private variable on the class instance (`#activity`)
+- It plays nicely with Ruby's OOP model
+- It allows for future extensibility including 3rd party extensions
+- Activity can be easily tested by injecting a test context into the class instead of the real one
+
+By default we'll use the name of the class as activity name (when communicating with the server).
+This is of course overridable in case the SDK users would like to use their own naming schema. And
+we'll use the method `#execute` as the primary entrypoint for executing user code.
+
+```ruby
+class MyActivity < Temporal::Activity
+  ManuallyCancelled = Class.new(Temporal::Error)
+
+  def execute(arg_1, arg_2: nil)
+    loop do
+      sleep 1
+      activity.logger.info('❤️beat')
+      activity.heartbeat('details')
+    end
+  rescue Temporal::ActivityCancelled
+    raise ManuallyCancelled, 'someone cancelled me'
+  end
+end
+```
+
+Notes:
+
+- `activity` is an instance of `Temporal::Activity::Context`
+- `activity.logger` will use a logging adapter configure via `Temporal::Configuration` (more on
+  this in the 2nd phase)
+- Common logging context can be configured by using middleware (more on this in the 2nd phase)
+- Errors defined within the activity class will be namespaces `MyActivity::ManuallyCancelled`,
+  which is a very useful property
+
+```ruby
+class Temporal::Activity::Context
+  def logger() -> Temporal::Logger
+
+  def heartbeat(*details) -> void
+
+  def info() -> Temporal::Info::Activity
+end
+```
+
 
 ## Payload converters
 

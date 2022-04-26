@@ -19,7 +19,7 @@ The Ruby SDK will be implemented in four loosely defined phases:
 ## Overview
 
 The Ruby SDK will be implemented on top of the [SDK Core](https://github.com/temporalio/sdk-core).
-The exact bridging mechanism will decided later as there are different alternatives.
+The exact bridging mechanism will be decided later as there are different alternatives.
 
 ### Goals
 
@@ -59,7 +59,7 @@ simply demonstrate language specifics.*
 
 ### Method invocations
 
-All parenthesis in Ruby are optional (despite the presense or absense of method arguments). So these
+All parentheses in Ruby are optional (despite the presence or absence of method arguments). So these
 calls are identical:
 
 ```ruby
@@ -74,7 +74,7 @@ my_method(a, b, c)
 my_method a, b, c
 ```
 
-The most common style suggests not using parenthesis when there are no arguments and using them
+The most common style suggests not using parentheses when there are no arguments and using them
 otherwise. This rule is often ignored in a case of a DSL
 (e.g. [RSpec](https://relishapp.com/rspec/rspec-expectations/docs/built-in-matchers)).
 
@@ -82,7 +82,7 @@ otherwise. This rule is often ignored in a case of a DSL
 
 Unlike other dynamic languages Ruby does not support requiring (or importing) files into a local
 scope. In practice that mean that everything that gets `require`d becomes globally available from
-every single part of the application. This applies to eveything including constants, variables,
+every single part of the application. This applies to everything including constants, variables,
 methods, classes and modules. Here's an example:
 
 my_method.rb:
@@ -152,7 +152,7 @@ executed at the same time (making it effectively single-threaded). The good news
 allow IO-bound instructions to be executed in parallel.
 
 While threads can offer a great performance boost in applications with a significant IO reliance. In
-order to effectively utilize a multi-core processor a Ruby application has to be executed using
+order to effectively utilise a multi-core processor a Ruby application has to be executed using
 multiple processes.
 
 #### Fibers
@@ -291,7 +291,7 @@ Notes:
 - This is not a complete definition of the client
 - Both positional arguments and keyword arguments are supported, except for the reserved `options:`
 - Conventions similar to Python SDK are used here:
-  - `Client` is a gneral purpose interface, not limited workflow-only interactions
+  - `Client` is a general purpose interface, not limited workflow-only interactions
   - Due to this method names are more descriptive than just `#start`, `#execute`, etc
   - `Client#execute_workflow` is added for convenience
 
@@ -327,7 +327,7 @@ end
 We thought about configuring the `Temporal::Client` with a namespace, similar to the Python SDK.
 It does bring the benefit of avoiding namespace to subsequent calls to the client. However we feel
 like it is an unjustified and artificial limitation that will impact some multi-tenant applications.
-Besides this can always be brought in a shape of a `NamespacedClient` if there's a need for it.
+Besides this can always be brought in the shape of a `NamespacedClient` if there's a need for it.
 
 
 ## Worker
@@ -403,26 +403,26 @@ workflow in its own Fiber (inside a thread). This serves two purposes:
 Given that Fibers are very lightweight this will allow us to keep many stick workflows efficiently
 in memory and manage accordingly to the worker configuration.
 
-Here's a diagram to demostrate the whole setup:
+Here's a diagram to demonstrate the whole setup:
 
 <img src="./ruby_threads.png" width="400" align="center" alt="Temporal" />
 
 ### Alternatives considered
 
-We've decided against using the `Client` to initialize the `Worker` (something that Go and Python
+We've decided against using the `Client` to initialise the `Worker` (something that Go and Python
 SDKs are doing). It seemed like a wrong abstraction and would require making many attributes public
 on the client to make sure the worker can access them (expanding the public API of a client). Using
 a configuration object solves this and opens up further optimisation opportunities (that will be
 proposed in the 2nd phase).
 
-We can potentially use reactor pattern via Async gem. This has the benefit of giving extra
+We can potentially use the reactor pattern via Async gem. This has the benefit of giving extra
 performance, however it would drastically reduce the performance unless activities are written in a
 reactor-friendly way. This can be further added as an optional approach to apps already using Async,
 but doesn't feel like a great default option.
 
-Additionally the SDK users will want to leverage multiple CPU by spawning multiple worker processes.
-We have agreed that this part should be left out of the Ruby SDK and handled by developers
-themselves. Potentially this functionality can be added as a separate Ruby gem.
+Additionally the SDK users will want to leverage multiple CPUs by spawning multiple worker
+processes. We have agreed that this part should be left out of the Ruby SDK and handled by
+developers themselves. Potentially this functionality can be added as a separate Ruby gem.
 
 
 ## Activities
@@ -451,7 +451,7 @@ class MyActivity < Temporal::Activity
       activity.logger.debug("Attempt #{activity.info.attempts}")
       activity.heartbeat('details')
     end
-  rescue Temporal::ActivityCancelled
+  rescue Temporal::Error::ActivityCancelled
     raise ManuallyCancelled, 'activity got cancelled'
   end
 end
@@ -480,7 +480,57 @@ class Temporal::Activity::Context
 end
 ```
 
+
 ## Payload converters
 
-TODO
+Ruby SDK will use the model proposed [here](https://docs.temporal.io/docs/concepts/what-is-a-data-converter/)
+to facilitate conversion between SDK inputs and payloads. Basically there will be two extension
+points on the `Temporal::Configuration` object allowing to add either a DataConverter or a Codec.
 
+The main difference is that a DataConverter translates between any Ruby object and a Payload, while
+a Codec is a lower level construct that encodes/decodes from a Payloads protobuf to a Payloads
+protobuf. The former is intended to support specific serialisation formats, while the later is for
+modifying a binary that is transmitted over the wire.
+
+```ruby
+config = Temporal::Configuration.new(url: 'localhost:7933')
+
+config.add_data_converter(MyProtobufConverter.new)
+config.add_data_converter(MyThriftConverter.new)
+
+config.add_codec(EncryptionCodec.new(KEY_ID))
+config.add_codec(CompressionCodec.new)
+```
+
+A data converter is expected to have this interface:
+
+```ruby
+class Temporal::DataConverter::Base
+  # Returns mime-type of the payload
+  def encoding() -> String
+
+  # Takes any Ruby object and returns a Payload object or nil if unable to convert
+  def to_payload(data: Any) -> Temporal::Payload
+
+  # Takes a Payload object and returns a Ruby object. Only called on a matching encoding
+  def from_payload(payload: Temporal::Payload) -> Any
+end
+```
+
+And a code is expected to have this interface:
+
+```ruby
+class Temporal::Codec::Base
+  # Takes Payloads object and returns a modified Payloads object
+  def encode(payloads: Temporal::Payloads) -> Temporal::Payloads
+
+  # Takes Payloads object and returns a modified Payloads object
+  def decode(payloads: Temporal::Payloads) -> Temporal::Payloads
+end
+```
+
+### Alternatives considered
+
+While some other SDKs combine these two constructs into one with a broader interface we think that
+these are different enough concepts that deserve first-class separation. Otherwise implementing
+Codecs becomes a tricky task where each Codec needs to be aware of all the DataConverters available.

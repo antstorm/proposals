@@ -301,9 +301,10 @@ the caller. The handle can of course be created from a workflow_id/run_id combin
 
 ```ruby
 class Temporal::WorkflowHandle
-  # Return the result of the workflow execution or raise if workflow is still running
-  # - await: true will wait (for up to :timeout seconds) for the workflow result
-  def result(await: false, timeout: nil) -> Any
+  # Return the result of the workflow execution or raise if a workflow is still running after
+  #   waiting for for up to :timeout seconds.
+  # Passing timeout: nil will not wait if the working is still running
+  def result(timeout: Integer) -> Any
 
   # Returns more information about a workflow
   def describe() -> Temporal::WorkflowExecutionInfo
@@ -442,8 +443,6 @@ we'll use the method `#execute` as the primary entrypoint for executing user cod
 
 ```ruby
 class MyActivity < Temporal::Activity
-  ManuallyCancelled = Class.new(Temporal::Error)
-
   def execute(arg_1, arg_2: nil)
     loop do
       sleep 1
@@ -451,8 +450,10 @@ class MyActivity < Temporal::Activity
       activity.logger.debug("Attempt #{activity.info.attempts}")
       activity.heartbeat('details')
     end
-  rescue Temporal::Error::ActivityCancelled
-    raise ManuallyCancelled, 'activity got cancelled'
+  rescue Temporal::Error::CancellationRequested
+    activity.logger.info('💀')
+    # Accept cancellation request
+    raise Temporal::Error::ActivityCancelled, 'cancellation details here'
   end
 end
 ```
@@ -464,8 +465,8 @@ Notes:
   this in the 2nd phase)
 - Common logging context can be configured by using middleware (more on this in the 2nd phase)
 - `activity.heartbeat` is a synchronous call
-- Errors defined within the activity class will be namespaces `MyActivity::ManuallyCancelled`,
-  which is a very useful property
+- In case of a cancellation request `Temporal::Error::CancellationRequested` will get raised, which
+  can be accepted by raising `Temporal::Error::ActivityCancelled`
 
 ```ruby
 class Temporal::Activity::Context
@@ -479,6 +480,44 @@ class Temporal::Activity::Context
   def info() -> Temporal::Info::Activity
 end
 ```
+
+### Return values and errors
+
+An activity can communicate its result to the workflow by returning a value or raising an error. The
+return values will get serialized as a `Payload` object similar to activity input arguments.
+Similarly, an error will get serialized and re-raised from within the workflow (if an activity
+called "synchronously").
+
+The main idea here is to make it feel (from the workflow's perspective) like a local invocation of
+an activity without any additional constructs in the way.
+
+```ruby
+class MakePaymentActivity < Temporal::Activity
+  PaymentMethodNotFound = Class.new(Temporal::Error::ActivityFailure)
+  PaymentFailed = Class.new(Temporal::Error::ActivityFailure)
+
+  def execute(payment_method_id)
+    payment_method = PaymentMethod.find(payment_method_id)
+    raise UserNotFound, "No payment_method with id #{payment_method_id}" unless payment_method
+
+    result = PaymentService.execute(user.payment_method)
+    raise PaymentFailed, "Unable to process payment: #{result.error}" if result.failure?
+
+    result.payment_id
+  end
+end
+```
+
+Notes:
+
+- Errors defined within the activity class are namespaced as `MyActivity::PaymentFailed`,
+  which is a very useful property
+  - This will however not work if a workflow does not have access to the activity definition
+  - In this case it will get raised as a generic `Temporal::Error::ActivityFailure` with an original
+    error's class name available via `#original_error`
+- Subclassing `Temporal::Error::ActivityFailure` allows us to inject extra information into the
+  error (such as activity name, id, etc)
+- All errors will also have their backtrace serialized and relayed to the caller
 
 
 ## Payload converters
@@ -522,10 +561,10 @@ And a code is expected to have this interface:
 ```ruby
 class Temporal::Codec::Base
   # Takes Payloads object and returns a modified Payloads object
-  def encode(payloads: Temporal::Payloads) -> Temporal::Payloads
+  def encode(payloads: [Temporal::Payload]) -> [Temporal::Payload]
 
   # Takes Payloads object and returns a modified Payloads object
-  def decode(payloads: Temporal::Payloads) -> Temporal::Payloads
+  def decode(payloads: [Temporal::Payload]) -> [Temporal::Payload]
 end
 ```
 

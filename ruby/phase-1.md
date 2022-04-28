@@ -535,10 +535,10 @@ modifying a binary that is transmitted over the wire.
 config = Temporal::Configuration.new(url: 'localhost:7933')
 
 config.add_data_converter(MyProtobufConverter.new)
-config.add_data_converter(MyThriftConverter.new)
+config.add_data_converter(MyThriftConverter) # can be a class/module based on duck-typing
 
 config.add_codec(EncryptionCodec.new(KEY_ID))
-config.add_codec(CompressionCodec.new)
+config.add_codec(CompressionCodec)
 ```
 
 A data converter is expected to have this interface:
